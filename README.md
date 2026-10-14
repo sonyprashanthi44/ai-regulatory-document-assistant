@@ -21,7 +21,7 @@ This is stated clearly in the UI banner and API responses.
 |-------|------|
 | Backend | FastAPI, JWT auth, in-memory session RAG |
 | Frontend | React (Vite) |
-| LLM | Google Gemini (`gemini-2.0-flash` + `text-embedding-004`) |
+| LLM | Google Gemini (`gemini-2.0-flash` + `gemini-embedding-001`) |
 | Auth | Register / login with JWT bearer tokens |
 
 ## Features
@@ -72,3 +72,4 @@ Use `sample_data/sample_company_policy.txt` to try Q&A without real confidential
 ## License
 
 MIT · © Thalari Sony Prashanthi
+

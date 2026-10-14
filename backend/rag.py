@@ -18,6 +18,18 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 TOP_K = 4
 
+# Current Gemini embedding models (text-embedding-004 was removed/renamed)
+EMBED_MODELS = (
+    "models/gemini-embedding-001",
+    "models/embedding-001",
+)
+CHAT_MODELS = (
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-1.5-flash",
+    "gemini-flash-latest",
+)
+
 
 @dataclass
 class Chunk:
@@ -81,27 +93,30 @@ def _configure_gemini() -> None:
     genai.configure(api_key=key)
 
 
-def _embed(texts: list[str]) -> list[np.ndarray]:
+def _embed_one(text: str, task_type: str) -> np.ndarray:
     _configure_gemini()
-    out: list[np.ndarray] = []
-    for text in texts:
-        result = genai.embed_content(
-            model="models/text-embedding-004",
-            content=text,
-            task_type="retrieval_document",
-        )
-        out.append(np.array(result["embedding"], dtype=np.float32))
-    return out
+    last_err: Exception | None = None
+    for model in EMBED_MODELS:
+        try:
+            result = genai.embed_content(
+                model=model,
+                content=text,
+                task_type=task_type,
+            )
+            emb = result["embedding"]
+            return np.array(emb, dtype=np.float32)
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"Embedding failed with all models: {last_err}")
+
+
+def _embed(texts: list[str]) -> list[np.ndarray]:
+    return [_embed_one(t, "retrieval_document") for t in texts]
 
 
 def _embed_query(text: str) -> np.ndarray:
-    _configure_gemini()
-    result = genai.embed_content(
-        model="models/text-embedding-004",
-        content=text,
-        task_type="retrieval_query",
-    )
-    return np.array(result["embedding"], dtype=np.float32)
+    return _embed_one(text, "retrieval_query")
 
 
 def add_document(email: str, filename: str, data: bytes) -> dict:
@@ -112,7 +127,6 @@ def add_document(email: str, filename: str, data: bytes) -> dict:
 
     embeddings = _embed(pieces)
     session = get_session(email)
-    # avoid duplicate filename noise — replace same name
     session.chunks = [c for c in session.chunks if c.source != filename]
     if filename in session.files:
         session.files = [f for f in session.files if f != filename]
@@ -157,7 +171,6 @@ def answer_query(email: str, question: str) -> dict:
 
     context = "\n\n".join(f"[Source: {h.source}]\n{h.text}" for h in hits)
     _configure_gemini()
-    model = genai.GenerativeModel("gemini-2.0-flash")
     prompt = f"""You are an enterprise compliance assistant.
 Answer ONLY using the provided policy context. If the context is insufficient, say you cannot find it in the uploaded documents.
 Be concise and cite source filenames inline.
@@ -167,8 +180,21 @@ Context:
 
 Question: {question}
 """
-    response = model.generate_content(prompt)
-    answer = (response.text or "").strip()
+    last_err: Exception | None = None
+    answer = ""
+    for name in CHAT_MODELS:
+        try:
+            model = genai.GenerativeModel(name)
+            response = model.generate_content(prompt)
+            answer = (response.text or "").strip()
+            if answer:
+                break
+        except Exception as e:
+            last_err = e
+            continue
+    if not answer:
+        raise RuntimeError(f"Generation failed with all models: {last_err}")
+
     sources = sorted({h.source for h in hits})
     return {
         "answer": answer,
