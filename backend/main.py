@@ -1,7 +1,9 @@
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from config import get_settings
 from auth import (
@@ -29,13 +31,52 @@ app = FastAPI(
     contact={"name": "Thalari Sony Prashanthi"},
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.origins + ["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+class EnsureCORS(BaseHTTPMiddleware):
+    """Guarantee CORS headers even when allow_origins is * (portfolio deploy)."""
+
+    async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "*")
+        if request.method == "OPTIONS":
+            return JSONResponse(
+                content={"ok": True},
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": origin or "*",
+                    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
+                    "Access-Control-Allow-Headers": request.headers.get(
+                        "access-control-request-headers", "*"
+                    ),
+                    "Access-Control-Allow-Credentials": "true",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = origin or "*"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Expose-Headers"] = "*"
+        return response
+
+
+# Starlette CORS + explicit middleware for stubborn browsers/hosts
+_origins = settings.origins
+if _origins == ["*"]:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+app.add_middleware(EnsureCORS)
 
 
 class QueryIn(BaseModel):
@@ -53,6 +94,7 @@ def root():
         "health": "/api/health",
         "docs": "/docs",
         "storage": "session-memory-only",
+        "gemini_configured": bool(settings.resolved_gemini_key()),
     }
 
 
@@ -63,6 +105,7 @@ def health():
         "status": "ok",
         "author": "Thalari Sony Prashanthi",
         "storage": "session-memory-only",
+        "gemini_configured": bool(settings.resolved_gemini_key()),
         "message": "Uploaded documents are NOT persisted. They exist only for the active login session.",
     }
 

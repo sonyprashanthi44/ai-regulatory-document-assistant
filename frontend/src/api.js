@@ -1,4 +1,4 @@
-const API_BASE = import.meta.env.VITE_API_BASE || "";
+const API_BASE = (import.meta.env.VITE_API_BASE || "").replace(/\/$/, "");
 
 function authHeaders() {
   const token = localStorage.getItem("token");
@@ -6,12 +6,22 @@ function authHeaders() {
 }
 
 async function handle(res) {
-  const data = await res.json().catch(() => ({}));
+  let data = {};
+  const text = await res.text();
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { detail: text || "Request failed" };
+  }
   if (!res.ok) {
     const d = data.detail;
     const msg = Array.isArray(d)
       ? d.map((x) => x.msg || JSON.stringify(x)).join("; ")
-      : d || data.message || "Request failed";
+      : typeof d === "string"
+        ? d
+        : d
+          ? JSON.stringify(d)
+          : data.message || `Request failed (${res.status})`;
     throw new Error(msg);
   }
   return data;
@@ -87,4 +97,8 @@ export async function askQuestion(question) {
       body: JSON.stringify({ question }),
     })
   );
+}
+
+export function apiBase() {
+  return API_BASE || "(same origin / Vite proxy)";
 }

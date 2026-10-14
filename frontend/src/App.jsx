@@ -190,6 +190,7 @@ export default function App() {
             />
             <button className="primary" disabled={busy}>{busy ? "Thinking…" : "Query with RAG"}</button>
           </form>
+          {error && <p className="error">{error}</p>}
           {answer && (
             <div className="answer">
               <h3>Answer</h3>

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-import google.generativeai as genai
+import httpx
 import numpy as np
 from pypdf import PdfReader
 from docx import Document
@@ -17,16 +17,18 @@ from config import get_settings
 CHUNK_SIZE = 800
 CHUNK_OVERLAP = 120
 TOP_K = 4
+GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
-# Current Gemini embedding models (text-embedding-004 was removed/renamed)
+# Prefer current models; fall back if a key/region lacks one
 EMBED_MODELS = (
-    "models/gemini-embedding-001",
-    "models/embedding-001",
+    "gemini-embedding-001",
+    "embedding-001",
 )
 CHAT_MODELS = (
     "gemini-2.0-flash",
     "gemini-2.0-flash-001",
     "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
     "gemini-flash-latest",
 )
 
@@ -44,7 +46,6 @@ class SessionStore:
     chunks: list[Chunk] = field(default_factory=list)
 
 
-# Keyed by user email — wiped on logout / clear
 _sessions: dict[str, SessionStore] = {}
 
 
@@ -56,6 +57,16 @@ def get_session(email: str) -> SessionStore:
 
 def clear_session(email: str) -> None:
     _sessions.pop(email, None)
+
+
+def _api_key() -> str:
+    key = get_settings().resolved_gemini_key()
+    if not key:
+        raise RuntimeError(
+            "GEMINI_API_KEY is not configured on the server. "
+            "Set it in Render Environment Variables and redeploy."
+        )
+    return key
 
 
 def _extract_text(filename: str, data: bytes) -> str:
@@ -75,7 +86,7 @@ def _chunk_text(text: str) -> list[str]:
     text = re.sub(r"\s+", " ", text).strip()
     if not text:
         return []
-    chunks = []
+    chunks: list[str] = []
     start = 0
     while start < len(text):
         end = min(start + CHUNK_SIZE, len(text))
@@ -86,37 +97,44 @@ def _chunk_text(text: str) -> list[str]:
     return chunks
 
 
-def _configure_gemini() -> None:
-    key = get_settings().gemini_api_key
-    if not key:
-        raise RuntimeError("GEMINI_API_KEY is not configured")
-    genai.configure(api_key=key)
-
-
 def _embed_one(text: str, task_type: str) -> np.ndarray:
-    _configure_gemini()
+    key = _api_key()
     last_err: Exception | None = None
+    payload_task = task_type.upper()  # RETRIEVAL_DOCUMENT / RETRIEVAL_QUERY
     for model in EMBED_MODELS:
+        url = f"{GEMINI_BASE}/models/{model}:embedContent"
+        body = {
+            "model": f"models/{model}",
+            "content": {"parts": [{"text": text}]},
+            "taskType": payload_task,
+        }
         try:
-            result = genai.embed_content(
-                model=model,
-                content=text,
-                task_type=task_type,
+            with httpx.Client(timeout=60.0) as client:
+                r = client.post(url, params={"key": key}, json=body)
+            if r.status_code >= 400:
+                last_err = RuntimeError(f"{model}: {r.status_code} {r.text[:300]}")
+                continue
+            data = r.json()
+            values = (
+                data.get("embedding", {}).get("values")
+                or data.get("embeddings", [{}])[0].get("values")
             )
-            emb = result["embedding"]
-            return np.array(emb, dtype=np.float32)
+            if not values:
+                last_err = RuntimeError(f"{model}: empty embedding in response")
+                continue
+            return np.array(values, dtype=np.float32)
         except Exception as e:
             last_err = e
             continue
-    raise RuntimeError(f"Embedding failed with all models: {last_err}")
+    raise RuntimeError(f"Embedding failed: {last_err}")
 
 
 def _embed(texts: list[str]) -> list[np.ndarray]:
-    return [_embed_one(t, "retrieval_document") for t in texts]
+    return [_embed_one(t, "RETRIEVAL_DOCUMENT") for t in texts]
 
 
 def _embed_query(text: str) -> np.ndarray:
-    return _embed_one(text, "retrieval_query")
+    return _embed_one(text, "RETRIEVAL_QUERY")
 
 
 def add_document(email: str, filename: str, data: bytes) -> dict:
@@ -128,8 +146,7 @@ def add_document(email: str, filename: str, data: bytes) -> dict:
     embeddings = _embed(pieces)
     session = get_session(email)
     session.chunks = [c for c in session.chunks if c.source != filename]
-    if filename in session.files:
-        session.files = [f for f in session.files if f != filename]
+    session.files = [f for f in session.files if f != filename]
     session.files.append(filename)
     for piece, emb in zip(pieces, embeddings):
         session.chunks.append(Chunk(text=piece, source=filename, embedding=emb))
@@ -155,22 +172,59 @@ def retrieve(email: str, query: str, k: int = TOP_K) -> list[Chunk]:
     if not session.chunks:
         return []
     q = _embed_query(query)
-    scored = [(_cosine(q, c.embedding), c) for c in session.chunks if c.embedding is not None]
+    scored = [
+        (_cosine(q, c.embedding), c)
+        for c in session.chunks
+        if c.embedding is not None
+    ]
     scored.sort(key=lambda x: x[0], reverse=True)
     return [c for _, c in scored[:k]]
+
+
+def _generate(prompt: str) -> str:
+    key = _api_key()
+    last_err: Exception | None = None
+    body = {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024},
+    }
+    for model in CHAT_MODELS:
+        url = f"{GEMINI_BASE}/models/{model}:generateContent"
+        try:
+            with httpx.Client(timeout=90.0) as client:
+                r = client.post(url, params={"key": key}, json=body)
+            if r.status_code >= 400:
+                last_err = RuntimeError(f"{model}: {r.status_code} {r.text[:300]}")
+                continue
+            data = r.json()
+            parts = (
+                data.get("candidates", [{}])[0]
+                .get("content", {})
+                .get("parts", [])
+            )
+            text = "".join(p.get("text", "") for p in parts).strip()
+            if text:
+                return text
+            last_err = RuntimeError(f"{model}: empty generation response")
+        except Exception as e:
+            last_err = e
+            continue
+    raise RuntimeError(f"Generation failed: {last_err}")
 
 
 def answer_query(email: str, question: str) -> dict:
     hits = retrieve(email, question)
     if not hits:
         return {
-            "answer": "No documents are loaded in your session. Upload a policy document first. Remember: files exist only for this login session.",
+            "answer": (
+                "No documents are loaded in your session. Upload a policy document first. "
+                "Remember: files exist only for this login session."
+            ),
             "sources": [],
             "session_only": True,
         }
 
     context = "\n\n".join(f"[Source: {h.source}]\n{h.text}" for h in hits)
-    _configure_gemini()
     prompt = f"""You are an enterprise compliance assistant.
 Answer ONLY using the provided policy context. If the context is insufficient, say you cannot find it in the uploaded documents.
 Be concise and cite source filenames inline.
@@ -180,30 +234,19 @@ Context:
 
 Question: {question}
 """
-    last_err: Exception | None = None
-    answer = ""
-    for name in CHAT_MODELS:
-        try:
-            model = genai.GenerativeModel(name)
-            response = model.generate_content(prompt)
-            answer = (response.text or "").strip()
-            if answer:
-                break
-        except Exception as e:
-            last_err = e
-            continue
-    if not answer:
-        raise RuntimeError(f"Generation failed with all models: {last_err}")
-
+    answer = _generate(prompt)
     sources = sorted({h.source for h in hits})
     return {
         "answer": answer,
         "sources": sources,
         "session_only": True,
-        "disclaimer": "Uploaded documents are session-only (in-memory). They are not stored on disk or in any database.",
+        "disclaimer": (
+            "Uploaded documents are session-only (in-memory). "
+            "They are not stored on disk or in any database."
+        ),
     }
 
 
 def session_fingerprint(email: str) -> str:
-    """Non-sensitive id for UI — not a storage key on disk."""
     return hashlib.sha256(email.encode()).hexdigest()[:12]
+
