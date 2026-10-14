@@ -42,7 +42,22 @@ class QueryIn(BaseModel):
     question: str
 
 
+@app.get("/")
+@app.head("/")
+def root():
+    """Render health checks probe HEAD/GET / and require HTTP 200."""
+    return {
+        "status": "ok",
+        "service": "AI Regulatory Document Assistant",
+        "author": "Thalari Sony Prashanthi",
+        "health": "/api/health",
+        "docs": "/docs",
+        "storage": "session-memory-only",
+    }
+
+
 @app.get("/api/health")
+@app.head("/api/health")
 def health():
     return {
         "status": "ok",
