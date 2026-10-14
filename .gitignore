@@ -1,0 +1,28 @@
+# env & secrets
+.env
+**/.env
+*.pem
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+backend/.venv/
+
+# node
+node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+
+# ide / os
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# logs
+*.log
+.coverage
+htmlcov/

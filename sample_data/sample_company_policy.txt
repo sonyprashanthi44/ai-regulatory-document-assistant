@@ -1,0 +1,40 @@
+ACME CORP — INFORMATION SECURITY & DATA RETENTION POLICY
+Version 3.2 | Effective Date: 2025-01-15 | Owner: Chief Compliance Officer
+
+1. Purpose
+This policy defines how ACME Corp protects company and customer data and how long records are retained.
+
+2. Data classification
+- Public: marketing materials, public website content
+- Internal: employee directories, internal wikis
+- Confidential: customer PII, contracts, financials
+- Restricted: authentication secrets, encryption keys, M&A documents
+
+3. Data retention
+- Customer account records: retained for 7 years after account closure
+- Security incident logs: retained for 3 years
+- Employee HR files: retained for 5 years after separation
+- Marketing analytics (non-PII): retained for 24 months
+- Backup tapes: rotated on a 90-day cycle
+
+4. Access control
+Access to Confidential and Restricted data requires manager approval and quarterly access reviews.
+Multi-factor authentication is mandatory for all remote access to production systems.
+Shared admin accounts are prohibited.
+
+5. Incident response
+Suspected data breaches must be reported to the Security Operations Center within 1 hour of discovery.
+The CISO and Legal must be notified within 4 hours for incidents involving customer PII.
+Affected customers are notified within 72 hours when legally required.
+
+6. Vendor management
+Vendors processing Confidential data must sign a Data Processing Agreement (DPA).
+Vendors are reassessed annually. Critical vendors require SOC 2 Type II or equivalent.
+
+7. Acceptable use
+Company devices must use full-disk encryption.
+Employees must not upload Confidential or Restricted documents to unsanctioned generative AI tools.
+Personal cloud storage is not approved for company Confidential data.
+
+8. Exceptions
+Exceptions require written approval from the Chief Compliance Officer and expire after 90 days unless renewed.
