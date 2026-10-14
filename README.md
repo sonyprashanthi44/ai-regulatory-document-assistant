@@ -57,15 +57,6 @@ npm run dev
 
 Open http://localhost:5173
 
-## Documentation
-
-| Doc | Description |
-|-----|-------------|
-| [01-project-overview-real-world-usecase](docs/01-project-overview-real-world-usecase.md) | Business context |
-| [02-technical-overview](docs/02-technical-overview.md) | Architecture |
-| [03-deployment-instructions](docs/03-deployment-instructions.md) | Deploy steps |
-| [04-sample-interview-questions](docs/04-sample-interview-questions.md) | Interview prep |
-| [05-deployment-guide-offline-online](docs/05-deployment-guide-offline-online.md) | Offline vs online |
 
 ## Live demo
 
