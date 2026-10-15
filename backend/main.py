@@ -1,20 +1,20 @@
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from config import get_settings
 from auth import (
+    Token,
     UserCreate,
     UserOut,
-    Token,
-    create_user,
     authenticate_user,
     create_access_token,
+    create_user,
     get_current_user,
 )
+from config import get_settings
 import rag
 
 settings = get_settings()
@@ -23,59 +23,44 @@ app = FastAPI(
     title="AI Regulatory Document Assistant",
     description=(
         "Session-scoped RAG for company policy Q&A. "
-        "Uploaded documents are held in memory for the login session only — "
-        "never written to disk or a database. "
+        "Documents stay in memory for the login session only. "
         "Author: Thalari Sony Prashanthi"
     ),
-    version="1.0.0",
+    version="2.0.0",
     contact={"name": "Thalari Sony Prashanthi"},
 )
 
 
 class EnsureCORS(BaseHTTPMiddleware):
-    """Guarantee CORS headers even when allow_origins is * (portfolio deploy)."""
-
     async def dispatch(self, request: Request, call_next):
-        origin = request.headers.get("origin", "*")
+        origin = request.headers.get("origin") or "*"
         if request.method == "OPTIONS":
             return JSONResponse(
                 content={"ok": True},
                 status_code=200,
                 headers={
-                    "Access-Control-Allow-Origin": origin or "*",
+                    "Access-Control-Allow-Origin": origin,
                     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD",
                     "Access-Control-Allow-Headers": request.headers.get(
                         "access-control-request-headers", "*"
                     ),
-                    "Access-Control-Allow-Credentials": "true",
                     "Access-Control-Max-Age": "86400",
                 },
             )
         response = await call_next(request)
-        response.headers["Access-Control-Allow-Origin"] = origin or "*"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Expose-Headers"] = "*"
         return response
 
 
-# Starlette CORS + explicit middleware for stubborn browsers/hosts
 _origins = settings.origins
-if _origins == ["*"]:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-else:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins if _origins != ["*"] else ["*"],
+    allow_credentials=_origins != ["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(EnsureCORS)
 
 
@@ -86,11 +71,11 @@ class QueryIn(BaseModel):
 @app.get("/")
 @app.head("/")
 def root():
-    """Render health checks probe HEAD/GET / and require HTTP 200."""
     return {
         "status": "ok",
         "service": "AI Regulatory Document Assistant",
         "author": "Thalari Sony Prashanthi",
+        "version": "2.0.0",
         "health": "/api/health",
         "docs": "/docs",
         "storage": "session-memory-only",
@@ -101,15 +86,16 @@ def root():
 @app.get("/api/health")
 @app.head("/api/health")
 def health():
-    status = {
+    payload = {
         "status": "ok",
         "author": "Thalari Sony Prashanthi",
+        "version": "2.0.0",
         "storage": "session-memory-only",
         "gemini_configured": bool(settings.resolved_gemini_key()),
-        "message": "Uploaded documents are NOT persisted. They exist only for the active login session.",
+        "message": "Uploaded documents are NOT persisted. Session memory only.",
     }
-    status.update(rag.gemini_status())
-    return status
+    payload.update(rag.gemini_status())
+    return payload
 
 
 @app.post("/api/auth/register", response_model=UserOut)
@@ -122,9 +108,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = authenticate_user(form_data.username, form_data.password)
     if not user:
         raise HTTPException(status_code=401, detail="Incorrect email or password")
-    token = create_access_token(user["email"])
     return Token(
-        access_token=token,
+        access_token=create_access_token(user["email"]),
         user=UserOut(email=user["email"], full_name=user["full_name"]),
     )
 
@@ -138,7 +123,7 @@ def me(user: UserOut = Depends(get_current_user)):
 def logout(user: UserOut = Depends(get_current_user)):
     rag.clear_session(user.email)
     return {
-        "message": "Logged out. All session documents and embeddings were wiped from memory.",
+        "message": "Logged out. Session documents wiped from memory.",
         "storage": "session-memory-only",
     }
 
@@ -152,14 +137,13 @@ async def upload_document(
     if len(data) > 8 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 8MB)")
     try:
-        result = rag.add_document(user.email, file.filename or "document.txt", data)
+        return rag.add_document(user.email, file.filename or "document.txt", data)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to process document: {e}")
-    return result
+        raise HTTPException(status_code=500, detail=f"Failed to process document: {e}") from e
 
 
 @app.get("/api/documents")
@@ -169,14 +153,14 @@ def documents(user: UserOut = Depends(get_current_user)):
         "files": files,
         "count": len(files),
         "storage": "session-memory-only",
-        "notice": "Documents exist only for this login session and are never stored on disk or in a database.",
+        "notice": "Documents exist only for this login session.",
     }
 
 
 @app.delete("/api/documents")
 def clear_documents(user: UserOut = Depends(get_current_user)):
     rag.clear_session(user.email)
-    return {"message": "Session documents cleared from memory.", "files": []}
+    return {"message": "Session documents cleared.", "files": []}
 
 
 @app.post("/api/query")
@@ -186,9 +170,9 @@ def query(body: QueryIn, user: UserOut = Depends(get_current_user)):
     try:
         return rag.answer_query(user.email, body.question.strip())
     except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e))
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}") from e
 
 
 if __name__ == "__main__":

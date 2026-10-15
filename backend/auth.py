@@ -1,10 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from pydantic import BaseModel, EmailStr
+
 from config import get_settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -43,12 +45,14 @@ def create_user(data: UserCreate) -> UserOut:
     email = data.email.lower()
     if email in _users:
         raise HTTPException(status_code=400, detail="Email already registered")
+    if len(data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     _users[email] = {
         "email": email,
-        "full_name": data.full_name,
+        "full_name": data.full_name.strip(),
         "hashed_password": hash_password(data.password),
     }
-    return UserOut(email=email, full_name=data.full_name)
+    return UserOut(email=email, full_name=data.full_name.strip())
 
 
 def authenticate_user(email: str, password: str) -> Optional[dict]:
@@ -77,13 +81,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> UserOut:
     )
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        email: str = payload.get("sub")
+        email: str | None = payload.get("sub")
         if not email:
             raise cred_exc
-    except JWTError:
-        raise cred_exc
+    except JWTError as exc:
+        raise cred_exc from exc
     user = _users.get(email.lower())
     if not user:
         raise cred_exc
     return UserOut(email=user["email"], full_name=user["full_name"])
-

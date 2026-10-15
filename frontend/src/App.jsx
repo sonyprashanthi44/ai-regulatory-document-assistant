@@ -21,6 +21,14 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [health, setHealth] = useState(null);
+
+  useEffect(() => {
+    fetch((import.meta.env.VITE_API_BASE || "").replace(/\/$/, "") + "/api/health")
+      .then((r) => r.json())
+      .then(setHealth)
+      .catch(() => setHealth(null));
+  }, []);
 
   useEffect(() => {
     if (!user) return;
@@ -56,6 +64,8 @@ export default function App() {
     setUser(null);
     setFiles([]);
     setAnswer(null);
+    setNotice("");
+    setError("");
     setBusy(false);
   }
 
@@ -68,7 +78,8 @@ export default function App() {
     try {
       const res = await api.uploadDocument(file);
       setFiles(res.session_files || []);
-      setNotice(res.note || "Uploaded to session memory only.");
+      const tag = res.retrieval_mode ? ` · ${res.retrieval_mode} retrieval` : "";
+      setNotice((res.note || "Uploaded to session memory only.") + tag);
     } catch (err) {
       setError(String(err.message || err));
     } finally {
@@ -106,19 +117,29 @@ export default function App() {
     }
   }
 
+  const geminiOk = health?.gemini_configured && !health?.gemini_embed_blocked;
+
   if (!user) {
     return (
       <div className="page">
         <header className="hero">
-          <p className="badge">Session-only RAG · No document persistence</p>
+          <p className="badge">Session-only RAG · Privacy by design</p>
           <h1>AI Regulatory Document Assistant</h1>
           <p className="sub">
             Upload company policies and ask natural-language compliance questions.
-            Documents stay in memory for your login session only — never saved to disk
-            or a database.
+            Files stay in server memory for your login only — never saved to disk or a database.
           </p>
           <p className="author">Author: {AUTHOR}</p>
+          <div className="chip-row">
+            <span className={`chip ${health ? "live" : "warn"}`}>
+              {health ? "API online" : "API warming up…"}
+            </span>
+            <span className={`chip ${geminiOk ? "live" : "warn"}`}>
+              {geminiOk ? "Gemini ready" : "Local fallback available"}
+            </span>
+          </div>
         </header>
+
         <form className="card auth" onSubmit={onAuth}>
           <div className="tabs">
             <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>
@@ -131,11 +152,20 @@ export default function App() {
           {mode === "register" && (
             <input placeholder="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} />
           )}
-          <input type="email" required placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input type="password" required minLength={6} placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input type="email" required placeholder="Work email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input
+            type="password"
+            required
+            minLength={6}
+            placeholder="Password (min 6)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
           {error && <p className="error">{error}</p>}
-          <button className="primary" disabled={busy}>{busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}</button>
-          <p className="hint">Demo auth is in-memory. Register each time the backend restarts.</p>
+          <button className="primary" disabled={busy}>
+            {busy ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+          </button>
+          <p className="hint">Demo auth is in-memory. Re-register after the backend restarts.</p>
         </form>
         <footer>Built by {AUTHOR} · Portfolio project</footer>
       </div>
@@ -151,14 +181,15 @@ export default function App() {
         </div>
         <div className="userbox">
           <span>{user.email}</span>
-          <button onClick={onLogout} disabled={busy}>Logout (wipes session docs)</button>
+          <button onClick={onLogout} disabled={busy}>
+            Logout · wipe session
+          </button>
         </div>
       </header>
 
       <div className="banner">
         <strong>Privacy notice:</strong> Uploaded documents are <em>not stored anywhere</em>.
-        They exist only in server memory for this login session and are deleted on logout,
-        clear, or server restart.
+        They exist only in server memory for this login session and are deleted on logout, clear, or restart.
       </div>
 
       <main className="grid">
@@ -166,7 +197,7 @@ export default function App() {
           <h2>Session documents</h2>
           <label className="upload">
             <input type="file" accept=".pdf,.docx,.txt,.md,.csv" onChange={onUpload} disabled={busy} />
-            <span>{busy ? "Processing…" : "Upload PDF / DOCX / TXT"}</span>
+            <span>{busy ? "Processing…" : "Drop or choose PDF / DOCX / TXT"}</span>
           </label>
           <ul className="files">
             {files.length === 0 && <li className="muted">No files in this session yet.</li>}
@@ -174,7 +205,9 @@ export default function App() {
               <li key={f}>{f}</li>
             ))}
           </ul>
-          <button onClick={onClearDocs} disabled={busy || !files.length}>Clear session documents</button>
+          <button onClick={onClearDocs} disabled={busy || !files.length}>
+            Clear session documents
+          </button>
           {notice && <p className="ok">{notice}</p>}
           {error && <p className="error">{error}</p>}
         </section>
@@ -183,12 +216,16 @@ export default function App() {
           <h2>Ask a compliance question</h2>
           <form onSubmit={onAsk}>
             <textarea
-              rows={4}
+              rows={5}
               placeholder="e.g. What is the data retention period for customer records?"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
             />
-            <button className="primary" disabled={busy}>{busy ? "Thinking…" : "Query with RAG"}</button>
+            <div className="form-actions">
+              <button className="primary" disabled={busy}>
+                {busy ? "Thinking…" : "Query with RAG"}
+              </button>
+            </div>
           </form>
           {error && <p className="error">{error}</p>}
           {answer && (
@@ -198,12 +235,18 @@ export default function App() {
               {answer.sources?.length > 0 && (
                 <p className="sources">Sources: {answer.sources.join(", ")}</p>
               )}
+              <div className="chip-row">
+                {answer.retrieval_mode && <span className="chip">retrieval: {answer.retrieval_mode}</span>}
+                {answer.generation_mode && <span className="chip">generation: {answer.generation_mode}</span>}
+              </div>
               <p className="muted">{answer.disclaimer}</p>
             </div>
           )}
         </section>
       </main>
-      <footer>© {new Date().getFullYear()} {AUTHOR} · Gemini RAG · Session-memory only</footer>
+      <footer>
+        © {new Date().getFullYear()} {AUTHOR} · Gemini RAG · Session-memory only
+      </footer>
     </div>
   );
 }

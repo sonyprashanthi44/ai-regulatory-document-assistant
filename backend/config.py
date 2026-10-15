@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -12,9 +12,11 @@ class Settings(BaseSettings):
 
     secret_key: str = "dev-secret-change-in-production"
     gemini_api_key: str = ""
-    access_token_expire_minutes: int = 60
+    access_token_expire_minutes: int = 120
     cors_origins: str = "*"
     algorithm: str = "HS256"
+    allow_local_fallback: bool = True
+    force_local_rag: bool = False
 
     def resolved_gemini_key(self) -> str:
         return (

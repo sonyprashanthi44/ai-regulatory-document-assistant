@@ -2,54 +2,36 @@
 
 **Author:** Thalari Sony Prashanthi
 
-Secure web app for uploading company policy documents and querying them in natural language using a **RAG (Retrieval-Augmented Generation)** pipeline.
+Session-only RAG app for company policy Q&A. Upload PDF/DOCX/TXT, ask compliance questions, get grounded answers.
 
-## Privacy-first design
+## Privacy
 
-**Uploaded documents are NOT stored anywhere permanent.**
-
-- Files are processed in memory only
-- Chunks + embeddings live in the active login session
-- Cleared on logout, manual clear, or server restart
-- No disk writes, no object storage, no document database
-
-This is stated clearly in the UI banner and API responses.
+Uploaded documents are **not stored permanently**. They live in server memory for the login session and are wiped on logout, clear, or restart.
 
 ## Stack
 
-| Layer | Tech |
-|-------|------|
-| Backend | FastAPI, JWT auth, in-memory session RAG |
-| Frontend | React (Vite) |
-| LLM | Google Gemini (`gemini-2.5-flash` / `gemini-2.0-flash` + `gemini-embedding-001`) |
-| Auth | Register / login with JWT bearer tokens |
+- **Backend:** FastAPI, JWT auth, Gemini embeddings + chat
+- **Fallback:** Local TF-IDF retrieval + extractive answers if Gemini is blocked (403)
+- **Frontend:** React + Vite (modern dark glass UI)
+- **Deploy:** Render (API) + Vercel (UI)
 
-## Features
-
-- Register / login (authenticated REST APIs)
-- Upload PDF, DOCX, TXT, MD, CSV (session-only)
-- Natural-language Q&A grounded in uploaded policies
-- Source citations
-- Explicit session wipe on logout
-
-## Live demo
+## Live
 
 - Frontend: https://ai-regulatory-document-assistant.vercel.app
 - Backend health: https://ai-regulatory-document-assistant.onrender.com/api/health
 - API docs: https://ai-regulatory-document-assistant.onrender.com/docs
 
-## Quick start (local)
+## Local setup
 
 ### Backend
 
 ```bash
 cd backend
 python -m venv .venv
-# Windows
 .venv\Scripts\activate
 pip install -r requirements.txt
 copy .env.example .env
-# set GEMINI_API_KEY and SECRET_KEY in .env
+# set GEMINI_API_KEY in .env
 uvicorn main:app --reload --port 8000
 ```
 
@@ -58,47 +40,48 @@ uvicorn main:app --reload --port 8000
 ```bash
 cd frontend
 npm install
-# optional: set VITE_API_BASE=http://127.0.0.1:8000
 npm run dev
 ```
 
 Open http://localhost:5173
 
-### Offline tests
+### Tests
 
 ```bash
 cd backend
 .venv\Scripts\python test_offline.py
-.venv\Scripts\python test_rag_mock.py
 ```
 
-## Deploy notes
+## Render env vars
 
-### Render (backend)
+| Key | Value |
+|-----|--------|
+| `PYTHON_VERSION` | `3.12.8` |
+| `SECRET_KEY` | auto |
+| `GEMINI_API_KEY` | from [AI Studio](https://aistudio.google.com/apikey) |
+| `CORS_ORIGINS` | `*` or your Vercel URL |
+| `ALLOW_LOCAL_FALLBACK` | `true` |
 
-1. New Web Service from this repo
-2. **Root Directory:** `backend` (or use root `render.yaml`)
-3. Build: `pip install --upgrade pip && pip install -r requirements.txt`
-4. Start: `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`
-5. Health check path: `/api/health`
-6. Env vars:
-   - `PYTHON_VERSION=3.12.8`
-   - `SECRET_KEY` (auto-generate)
-   - `GEMINI_API_KEY` = your Google AI Studio key (**required** for upload/query)
-   - `CORS_ORIGINS=*` (or your Vercel URL)
+Root directory: `backend` · Start: `uvicorn main:app --host 0.0.0.0 --port $PORT` · Health: `/api/health`
 
-**Important:** Free Render instances sleep when idle — the first request after sleep can take 30–60s. Builds should be a few minutes after numpy was removed from dependencies.
+## Vercel env
 
-### Vercel (frontend)
+`VITE_API_BASE=https://ai-regulatory-document-assistant.onrender.com`
 
-1. Root Directory: `frontend`
-2. Build: `npm run build`
-3. Output: `dist`
-4. Env: `VITE_API_BASE=https://ai-regulatory-document-assistant.onrender.com`
+## Gemini 403 denied access
 
-## Sample document
+Google sometimes flags free-tier projects. Fix:
 
-Use `sample_data/sample_company_policy.txt` to try Q&A without real confidential files.
+1. Age + phone verification + 2SV on the Google account  
+2. New key in AI Studio  
+3. Enable billing/prepaid if still blocked  
+4. Update `GEMINI_API_KEY` on Render and redeploy  
+
+Until then, local fallback still allows upload + Q&A.
+
+## Sample file
+
+`sample_data/sample_company_policy.txt`
 
 ## License
 

@@ -16,3 +16,5 @@ services:
         sync: false
       - key: CORS_ORIGINS
         value: "*"
+      - key: ALLOW_LOCAL_FALLBACK
+        value: "true"

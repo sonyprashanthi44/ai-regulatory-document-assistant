@@ -15,13 +15,15 @@ async function handle(res) {
   }
   if (!res.ok) {
     const d = data.detail;
-    const msg = Array.isArray(d)
+    let msg = Array.isArray(d)
       ? d.map((x) => x.msg || JSON.stringify(x)).join("; ")
       : typeof d === "string"
         ? d
         : d
           ? JSON.stringify(d)
           : data.message || `Request failed (${res.status})`;
+    // Keep UI readable
+    if (msg.length > 420) msg = msg.slice(0, 420) + "…";
     throw new Error(msg);
   }
   return data;
@@ -63,9 +65,7 @@ export async function logout() {
 }
 
 export async function listDocuments() {
-  return handle(
-    await fetch(`${API_BASE}/api/documents`, { headers: { ...authHeaders() } })
-  );
+  return handle(await fetch(`${API_BASE}/api/documents`, { headers: { ...authHeaders() } }));
 }
 
 export async function uploadDocument(file) {
@@ -97,8 +97,4 @@ export async function askQuestion(question) {
       body: JSON.stringify({ question }),
     })
   );
-}
-
-export function apiBase() {
-  return API_BASE || "(same origin / Vite proxy)";
 }

@@ -1,4 +1,4 @@
-"""Offline tests — no Gemini key required."""
+"""Offline tests with local fallback (no Gemini key required)."""
 from __future__ import annotations
 
 import sys
@@ -7,85 +7,48 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from fastapi.testclient import TestClient
+
 import rag
 from main import app
 
 
-def test_chunk_and_extract():
-    text = ("Customer account records are retained for 7 years after account closure. " * 40).strip()
-    chunks = rag._chunk_text(text)
-    assert len(chunks) >= 2
-    extracted = rag._extract_text("policy.txt", text.encode("utf-8"))
-    assert "7 years" in extracted
-    print("chunk/extract OK", len(chunks), "chunks")
+def main() -> None:
+    assert len(rag._chunk_text("word " * 500)) >= 2
+    v = rag._local_embed("customer records retained 7 years")
+    assert len(v) == rag.LOCAL_DIM
 
-
-def test_cosine():
-    a = [1.0, 0.0, 0.0]
-    b = [1.0, 0.0, 0.0]
-    c = [0.0, 1.0, 0.0]
-    assert abs(rag._cosine(a, b) - 1.0) < 1e-6
-    assert abs(rag._cosine(a, c)) < 1e-6
-    print("cosine OK")
-
-
-def test_auth_and_health():
     client = TestClient(app)
     h = client.get("/api/health")
     assert h.status_code == 200
-    body = h.json()
-    assert body["status"] == "ok"
-    assert "gemini-embedding-001" in body.get("embed_models", [])
-    assert "embedding-001" not in body.get("embed_models", [])
+    assert h.json()["status"] == "ok"
+    assert h.json().get("local_fallback_enabled") is True
 
-    r = client.post(
-        "/api/auth/register",
-        json={"email": "test@example.com", "password": "secret12", "full_name": "Tester"},
-    )
-    assert r.status_code == 200, r.text
+    email = "rebuild@example.com"
+    client.post("/api/auth/register", json={"email": email, "password": "secret12", "full_name": "Rebuild"})
+    token = client.post("/api/auth/login", data={"username": email, "password": "secret12"}).json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
 
-    login = client.post(
-        "/api/auth/login",
-        data={"username": "test@example.com", "password": "secret12"},
-    )
-    assert login.status_code == 200, login.text
-    token = login.json()["access_token"]
-    me = client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert me.status_code == 200
-    assert me.json()["email"] == "test@example.com"
-    print("auth/health OK")
-
-
-def test_upload_requires_gemini_or_mocks():
-    """Without a key, upload should return a clear 503, not a 500 crash."""
-    client = TestClient(app)
-    client.post(
-        "/api/auth/register",
-        json={"email": "nokey@example.com", "password": "secret12", "full_name": "NoKey"},
-    )
-    login = client.post(
-        "/api/auth/login",
-        data={"username": "nokey@example.com", "password": "secret12"},
-    )
-    token = login.json()["access_token"]
-    files = {"file": ("policy.txt", b"Retention is 7 years.", "text/plain")}
-    res = client.post(
+    sample = Path(__file__).resolve().parents[1] / "sample_data" / "sample_company_policy.txt"
+    up = client.post(
         "/api/documents/upload",
-        headers={"Authorization": f"Bearer {token}"},
-        files=files,
+        headers=headers,
+        files={"file": ("sample_company_policy.txt", sample.read_bytes(), "text/plain")},
     )
-    # Either works (if key present) or clean 503
-    assert res.status_code in (200, 503), res.text
-    if res.status_code == 503:
-        assert "GEMINI" in res.json()["detail"].upper() or "Embedding" in res.json()["detail"]
-        print("upload without key returns clean 503 OK")
-    else:
-        print("upload with key OK", res.json())
+    assert up.status_code == 200, up.text
+    assert up.json()["retrieval_mode"] == "local"
+
+    q = client.post(
+        "/api/query",
+        headers=headers,
+        json={"question": "What is the data retention period for customer records?"},
+    )
+    assert q.status_code == 200, q.text
+    body = q.json()
+    assert "7 years" in body["answer"].lower()
+    assert "sample_company_policy.txt" in body["sources"]
+    print("ALL OFFLINE TESTS PASSED")
+    print("answer:", body["answer"][:160])
 
 
 if __name__ == "__main__":
-    test_chunk_and_extract()
-    test_cosine()
-    test_auth_and_health()
-    test_upload_requires_gemini_or_mocks()
-    print("ALL OFFLINE TESTS PASSED")
+    main()
