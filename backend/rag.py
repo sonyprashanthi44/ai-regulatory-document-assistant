@@ -22,14 +22,19 @@ EMBED_DIM = 768
 LOCAL_DIM = 384
 GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
-EMBED_MODELS = ("gemini-embedding-001",)
+EMBED_MODELS = (
+    "gemini-embedding-001",
+    "gemini-embedding-2",
+    "gemini-embedding-2-preview",
+)
 CHAT_MODELS = (
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-2.0-flash-001",
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
     "gemini-flash-latest",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash",
+    "gemini-2.5-flash",
 )
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{2,}", re.I)
