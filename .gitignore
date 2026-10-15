@@ -14,7 +14,10 @@ backend/.venv/
 node_modules/
 frontend/dist/
 frontend/.env
-frontend/.env.*
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+!frontend/.env.example
 
 # ide / os
 .idea/
