@@ -101,13 +101,15 @@ def root():
 @app.get("/api/health")
 @app.head("/api/health")
 def health():
-    return {
+    status = {
         "status": "ok",
         "author": "Thalari Sony Prashanthi",
         "storage": "session-memory-only",
         "gemini_configured": bool(settings.resolved_gemini_key()),
         "message": "Uploaded documents are NOT persisted. They exist only for the active login session.",
     }
+    status.update(rag.gemini_status())
+    return status
 
 
 @app.post("/api/auth/register", response_model=UserOut)
